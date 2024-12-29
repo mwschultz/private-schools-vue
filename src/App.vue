@@ -1,20 +1,25 @@
 <template>
   <div id="app">
-    <h1>Private Schools Data</h1>
+    <h1>Private Schools in North Carolina</h1>
     <div v-if="loading">Loading...</div>
     <div v-else-if="error">{{ error }}</div>
     <div v-else>
       <div id="map" style="height: 500px; width: 100%;"></div>
     </div>
   </div>
+      <FooterComponent />
 </template>
 
 <script>
 import axios from 'axios';
+import FooterComponent from './components/Footer.vue';
 
 /* global google */
 
 export default {
+  components: {
+    FooterComponent
+  },
   data() {
     return {
       data: null,
@@ -79,14 +84,17 @@ export default {
       }
     },
 
-    loadGoogleMaps() {
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.VUE_APP_GOOGLE_MAPS_API_KEY}&callback=initMap`;
-      script.async = true;
-      script.defer = true;
-      window.initMap = this.initMap;
-      document.head.appendChild(script);
-    },
+loadGoogleMaps() {
+  if (!document.querySelector(`script[src*="maps.googleapis.com"]`)) {
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.VUE_APP_GOOGLE_MAPS_API_KEY}&callback=initMap`;
+    script.async = true;
+    script.defer = true;
+    script.setAttribute('loading', 'async');
+    window.initMap = this.initMap;
+    document.head.appendChild(script);
+  }
+},
 
     initMap() {
       if (typeof google !== 'undefined') {
