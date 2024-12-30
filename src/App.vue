@@ -100,7 +100,7 @@ export default {
             },
           }
         );
-        console.log('School data structure:', response.data.data[0]); //
+
         this.data = response.data.data;
         this.loadGoogleMaps();
       } catch (error) {
@@ -134,25 +134,25 @@ export default {
       }
     },
 
- async geocodeAddress(address, attributes, schoolId) {
-  this.geocoder.geocode({ address: address }, (results, status) => {
-    if (status === "OK") {
-      const marker = new google.maps.Marker({
-        map: this.map,
-        position: results[0].geometry.location,
-        title: attributes.name,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: "#2c3e50",
-          fillOpacity: 1,
-          strokeWeight: 2,
-          strokeColor: "#ffffff",
-        },
-      });
+    async geocodeAddress(address, attributes, schoolId) {
+      this.geocoder.geocode({ address: address }, (results, status) => {
+        if (status === "OK") {
+          const marker = new google.maps.Marker({
+            map: this.map,
+            position: results[0].geometry.location,
+            title: attributes.name,
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 8,
+              fillColor: "#2c3e50",
+              fillOpacity: 1,
+              strokeWeight: 2,
+              strokeColor: "#ffffff",
+            },
+          });
 
-      // Store the marker reference
-      this.markers.set(schoolId, marker);
+          // Store the marker reference
+          this.markers.set(schoolId, marker);
 
           const infoWindow = new google.maps.InfoWindow({
             content: `
@@ -178,12 +178,12 @@ export default {
       });
     },
 
-addMarkers() {
-  this.data.forEach((school) => {
-    const address = `${school.attributes.street}, ${school.attributes.city}, ${school.attributes.state}`;
-    this.geocodeAddress(address, school.attributes, school.id);
-  });
-},
+    addMarkers() {
+      this.data.forEach((school) => {
+        const address = `${school.attributes.street}, ${school.attributes.city}, ${school.attributes.state}`;
+        this.geocodeAddress(address, school.attributes, school.id);
+      });
+    },
 
     highlightMarker(schoolId) {
       const marker = this.markers.get(schoolId);
