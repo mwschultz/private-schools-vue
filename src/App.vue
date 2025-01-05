@@ -11,6 +11,40 @@
       <button @click="retryFetch" class="retry-button">Retry</button>
     </div>
     <div v-else class="main-container">
+      <!-- Select counties -->
+      <div class="county-selection">
+        <h2>Filter By Counties</h2>
+        <div v-if="loadingCounties">Loading counties...</div>
+        <div v-else-if="countyError">{{ countyError }}</div>
+        <div v-else>
+          <div class="counties-grid-container">
+            <div class="counties-grid">
+              <div
+                v-for="county in sortedCounties"
+                :key="county.id"
+                class="county-checkbox-wrapper"
+              >
+                <label class="county-checkbox">
+                  <input
+                    type="checkbox"
+                    :value="county.id"
+                    v-model="selectedCountyIds"
+                    @change="handleCountySelection"
+                  />
+                  <span class="county-name">{{ county.attributes.name }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="selection-summary" v-if="selectedCountyIds.length > 0">
+            Selected: {{ selectedCountyIds.length }} counties
+            <button @click="clearSelection" class="clear-button">
+              Clear All
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="map-container">
         <LeafletMap
           :markers="transformedMarkers"
@@ -26,7 +60,7 @@
             v-for="school in apiData"
             :key="school.id"
             class="school-card"
-            :class="{ 'highlighted': highlightedSchoolId === school.id }"
+            :class="{ highlighted: highlightedSchoolId === school.id }"
             @mouseover="highlightMarker(school.id)"
             @mouseout="resetMarker"
           >
@@ -54,7 +88,7 @@ export default {
     LeafletMap,
     FooterComponent,
   },
-  
+
   data() {
     return {
       apiData: null,
@@ -63,27 +97,47 @@ export default {
       token: null,
       transformedMarkers: [],
       highlightedSchoolId: null,
+      counties: [],
+      selectedCountyIds: [],
+      loadCounties: true,
+      countyError: null,
     };
   },
 
   async created() {
-    await this.initializeData();
+    try {
+      await this.fetchToken();
+      await Promise.all([this.fetchCounties(), this.fetchData()]);
+    } catch (error) {
+      this.error = "Failed to fetch data";
+    } finally {
+      this.loading = false;
+    }
+  },
+
+    computed: {
+    sortedCounties() {
+         console.log('Current counties state:', this.counties);
+      return [...this.counties].sort((a, b) => 
+        a.attributes.name.localeCompare(b.attributes.name)
+      );
+    }
   },
 
   methods: {
-    async initializeData() {
-      try {
-        this.loading = true;
-        this.error = null;
-        await this.fetchToken();
-        await this.fetchData();
-      } catch (error) {
-        console.error('Initialization error:', error);
-        this.error = "Failed to load schools data. Please try again.";
-      } finally {
-        this.loading = false;
-      }
-    },
+    // async initializeData() {
+    //   try {
+    //     this.loading = true;
+    //     this.error = null;
+    //     await this.fetchToken();
+    //     await this.fetchData();
+    //   } catch (error) {
+    //     console.error("Initialization error:", error);
+    //     this.error = "Failed to load schools data. Please try again.";
+    //   } finally {
+    //     this.loading = false;
+    //   }
+    // },
 
     transformApiData(schools) {
       if (!schools) return [];
@@ -118,8 +172,28 @@ export default {
         );
         this.token = response.data.access_token;
       } catch (error) {
-        console.error('Token fetch error:', error);
+        console.error("Token fetch error:", error);
         throw new Error("Authentication failed");
+      }
+    },
+
+    async fetchCounties() {
+      try {
+        this.loadingCounties = true;
+        const response = await axios.get(
+          "https://private-schools.onrender.com/api/v1/counties",
+          {
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+            },
+          }
+        );
+        console.log('Counties response:', response.data);
+        this.counties = response.data.data;
+      } catch (error) {
+        this.countyError = "Failed to load counties";
+      } finally {
+        this.loadingCounties = false;
       }
     },
 
@@ -135,7 +209,7 @@ export default {
         );
         this.apiData = response.data.data;
       } catch (error) {
-        console.error('Data fetch error:', error);
+        console.error("Data fetch error:", error);
         throw new Error("Failed to fetch schools data");
       }
     },
@@ -150,9 +224,11 @@ export default {
 
     handleMarkerClick(markerId) {
       // Scroll the corresponding school card into view
-      const schoolCard = document.querySelector(`[data-school-id="${markerId}"]`);
+      const schoolCard = document.querySelector(
+        `[data-school-id="${markerId}"]`
+      );
       if (schoolCard) {
-        schoolCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        schoolCard.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     },
 
@@ -166,15 +242,13 @@ export default {
       handler(newData) {
         this.transformedMarkers = this.transformApiData(newData);
       },
-      immediate: true
-    }
-  }
+      immediate: true,
+    },
+  },
 };
 </script>
 
 <style>
-
-
 .loading-state {
   text-align: center;
   padding: 2rem;
@@ -191,8 +265,12 @@ export default {
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .error-state {
@@ -229,7 +307,113 @@ export default {
 .map-container {
   flex: 1;
   min-width: 0;
-  min-height: 500px; /* Add this */
-  position: relative; /* Add this */
+  min-height: 500px; 
+  position: relative; 
+}
+
+.counties-grid-container {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+}
+
+.counties-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 8px;
+  padding: 4px;
+}
+
+.county-checkbox-wrapper {
+  min-width: 0;
+}
+
+.county-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.county-checkbox:hover {
+  background-color: #e2e8f0;
+  border-radius: 4px;
+}
+
+.county-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selection-summary {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background-color: #e2e8f0;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.clear-button {
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8em;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.clear-button:hover {
+  background-color: #dc2626;
+}
+
+/* Scrollbar styling */
+.counties-grid-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.counties-grid-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.counties-grid-container::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+}
+
+.counties-grid-container::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .counties-grid {
+    grid-template-columns: repeat(8, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .counties-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .counties-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 </style>
