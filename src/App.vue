@@ -1,20 +1,34 @@
+# App.vue
 <template>
   <div id="app">
     <h1>Private Schools in North Carolina</h1>
-    <div v-if="loading">Loading...</div>
-    <div v-else-if="error">{{ error }}</div>
+    <div v-if="loading" class="loading-state">
+      <div class="loading-spinner"></div>
+      Loading...
+    </div>
+    <div v-else-if="error" class="error-state">
+      {{ error }}
+      <button @click="retryFetch" class="retry-button">Retry</button>
+    </div>
     <div v-else class="main-container">
       <div class="map-container">
-        <div id="map"></div>
+        <LeafletMap
+          :markers="transformedMarkers"
+          :highlightedMarkerId="highlightedSchoolId"
+          v-if="transformedMarkers.length > 0"
+          @marker-click="handleMarkerClick"
+        />
+        <div v-else class="loading">Loading locations...</div>
       </div>
       <div class="schools-list">
         <div class="schools-grid">
           <div
-            v-for="school in data"
+            v-for="school in apiData"
             :key="school.id"
             class="school-card"
+            :class="{ 'highlighted': highlightedSchoolId === school.id }"
             @mouseover="highlightMarker(school.id)"
-            @mouseout="resetMarker(school.id)"
+            @mouseout="resetMarker"
           >
             <h3>{{ school.attributes.name }}</h3>
             <div class="school-details">
@@ -26,47 +40,66 @@
         </div>
       </div>
     </div>
-    <FooterComponent />
   </div>
+  <FooterComponent />
 </template>
 
 <script>
 import axios from "axios";
+import LeafletMap from "./components/LeafletMap.vue";
 import FooterComponent from "./components/Footer.vue";
-
-/* global google */
 
 export default {
   components: {
+    LeafletMap,
     FooterComponent,
   },
+  
   data() {
     return {
-      data: null,
+      apiData: null,
       loading: true,
       error: null,
       token: null,
-      map: null,
-      geocoder: null,
-      markers: new Map(),
+      transformedMarkers: [],
+      highlightedSchoolId: null,
     };
   },
-  computed: {
-    formattedData() {
-      return JSON.stringify(this.data, null, 2);
-    },
-  },
+
   async created() {
-    try {
-      await this.fetchToken();
-      await this.fetchData();
-    } catch (error) {
-      this.error = "Failed to fetch data";
-    } finally {
-      this.loading = false;
-    }
+    await this.initializeData();
   },
+
   methods: {
+    async initializeData() {
+      try {
+        this.loading = true;
+        this.error = null;
+        await this.fetchToken();
+        await this.fetchData();
+      } catch (error) {
+        console.error('Initialization error:', error);
+        this.error = "Failed to load schools data. Please try again.";
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    transformApiData(schools) {
+      if (!schools) return [];
+
+      return schools.map((school) => ({
+        id: school.id,
+        position: [school.attributes.latitude, school.attributes.longitude],
+        popup: `
+          <strong>${school.attributes.name}</strong><br>
+          ${school.attributes.street}<br>
+          ${school.attributes.city}, ${school.attributes.state}<br>
+          ${school.attributes.county} County
+        `,
+      }));
+    },
+
     async fetchToken() {
       try {
         const response = await axios.post(
@@ -85,8 +118,8 @@ export default {
         );
         this.token = response.data.access_token;
       } catch (error) {
-        this.error = "Failed to fetch token";
-        throw error;
+        console.error('Token fetch error:', error);
+        throw new Error("Authentication failed");
       }
     },
 
@@ -100,229 +133,103 @@ export default {
             },
           }
         );
-
-        this.data = response.data.data;
-        this.loadGoogleMaps();
+        this.apiData = response.data.data;
       } catch (error) {
-        this.error = "Failed to fetch data";
-        throw error;
+        console.error('Data fetch error:', error);
+        throw new Error("Failed to fetch schools data");
       }
-    },
-
-    loadGoogleMaps() {
-      if (!document.querySelector(`script[src*="maps.googleapis.com"]`)) {
-        const script = document.createElement("script");
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.TEMP}&callback=initMap`;
-        script.async = true;
-        script.defer = true;
-        script.setAttribute("loading", "async");
-        window.initMap = this.initMap;
-        document.head.appendChild(script);
-      }
-    },
-
-    initMap() {
-      if (typeof google !== "undefined") {
-        this.map = new google.maps.Map(document.getElementById("map"), {
-          center: { lat: 35.7796, lng: -78.6382 }, // Center the map to North Carolina
-          zoom: 7,
-        });
-        this.geocoder = new google.maps.Geocoder();
-        this.addMarkers();
-      } else {
-        console.error("Google Maps API is not loaded.");
-      }
-    },
-
-    async geocodeAddress(address, attributes, schoolId) {
-      this.geocoder.geocode({ address: address }, (results, status) => {
-        if (status === "OK") {
-          const marker = new google.maps.Marker({
-            map: this.map,
-            position: results[0].geometry.location,
-            title: attributes.name,
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: "#2c3e50",
-              fillOpacity: 1,
-              strokeWeight: 2,
-              strokeColor: "#ffffff",
-            },
-          });
-
-          // Store the marker reference
-          this.markers.set(schoolId, marker);
-
-          const infoWindow = new google.maps.InfoWindow({
-            content: `
-              <div>
-                <h3>${attributes.name}</h3>
-                <p><strong>Address:</strong> ${address}</p>
-              </div>
-            `,
-          });
-
-          marker.addListener("mouseover", () => {
-            infoWindow.open(this.map, marker);
-          });
-
-          marker.addListener("mouseout", () => {
-            infoWindow.close();
-          });
-        } else {
-          console.error(
-            "Geocode was not successful for the following reason: " + status
-          );
-        }
-      });
-    },
-
-    addMarkers() {
-      this.data.forEach((school) => {
-        const address = `${school.attributes.street}, ${school.attributes.city}, ${school.attributes.state}`;
-        this.geocodeAddress(address, school.attributes, school.id);
-      });
     },
 
     highlightMarker(schoolId) {
-      const marker = this.markers.get(schoolId);
-      if (marker) {
-        marker.setIcon({
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 12, // Larger size
-          fillColor: "#e74c3c", // Different color (red)
-          fillOpacity: 1,
-          strokeWeight: 3,
-          strokeColor: "#ffffff",
-        });
+      this.highlightedSchoolId = schoolId;
+    },
 
-        // Optionally pan to the marker
-        this.map.panTo(marker.getPosition());
+    resetMarker() {
+      this.highlightedSchoolId = null;
+    },
+
+    handleMarkerClick(markerId) {
+      // Scroll the corresponding school card into view
+      const schoolCard = document.querySelector(`[data-school-id="${markerId}"]`);
+      if (schoolCard) {
+        schoolCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     },
 
-    resetMarker(schoolId) {
-      const marker = this.markers.get(schoolId);
-      if (marker) {
-        marker.setIcon({
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: "#2c3e50",
-          fillOpacity: 1,
-          strokeWeight: 2,
-          strokeColor: "#ffffff",
-        });
-      }
+    retryFetch() {
+      this.initializeData();
     },
   },
+
+  watch: {
+    apiData: {
+      handler(newData) {
+        this.transformedMarkers = this.transformApiData(newData);
+      },
+      immediate: true
+    }
+  }
 };
 </script>
 
 <style>
-#app {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
-  color: #2c3e50;
-  margin: 20px;
-}
 
-h1 {
+
+.loading-state {
   text-align: center;
-  margin-bottom: 30px;
+  padding: 2rem;
 }
 
-.main-container {
-  display: flex;
-  gap: 20px;
-  height: calc(100vh - 200px);
-  min-height: 500px;
+.loading-spinner {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #3498db;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.error-state {
+  text-align: center;
+  color: #e74c3c;
+  padding: 2rem;
+}
+
+.retry-button {
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.retry-button:hover {
+  background-color: #2980b9;
+}
+
+.school-card.highlighted {
+  background-color: #e3f2fd;
+  border-left: 4px solid #2196f3;
+}
+
+/* Ensure smooth transitions */
+.school-card {
+  border-left: 4px solid transparent;
+  transition: all 0.3s ease;
 }
 
 .map-container {
   flex: 1;
   min-width: 0;
-}
-
-#map {
-  height: 100%;
-  width: 100%;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.schools-list {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding-right: 10px;
-}
-
-.schools-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 20px;
-  padding: 10px;
-}
-
-.school-card {
-  background: white;
-  border-radius: 8px;
-  padding: 15px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  text-align: left;
-  transition: all 0.2s ease; /* Add smooth transition */
-  cursor: pointer; /* Add pointer cursor to indicate interactivity */
-}
-
-.school-card:hover {
-  background-color: #f5f5f5; /* Light grey background on hover */
-  transform: translateY(-2px); /* Slight lift effect */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15); /* Enhanced shadow on hover */
-}
-
-.school-card h3 {
-  margin-top: 0;
-  margin-bottom: 10px;
-  color: #2c3e50;
-}
-
-.school-details p {
-  margin: 5px 0;
-  font-size: 0.9em;
-}
-
-/* Responsive design */
-@media (max-width: 768px) {
-  .main-container {
-    flex-direction: column;
-    height: auto;
-  }
-
-  .map-container {
-    height: 400px;
-  }
-
-  .schools-list {
-    height: 500px;
-  }
-}
-
-/* Scrollbar styling */
-.schools-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.schools-list::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
-}
-
-.schools-list::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 4px;
-}
-
-.schools-list::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  min-height: 500px; /* Add this */
+  position: relative; /* Add this */
 }
 </style>
